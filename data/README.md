@@ -1,14 +1,13 @@
 # Data policy
 
-The repository intentionally does **not** include the raw otoscopic images.
+The repository intentionally does **not** include the raw otoscopic images or bulky generated audit tables.
 
-Use `data/dataset_inventory.csv` and `data/archive_duplicate_groups.csv` to
-inspect the supplied archive-level audit. When you have legally obtained and
-extracted the data, place it below:
+When you have legally obtained and extracted the data, place it below:
 
 ```text
 data/raw/Otoscopic_Data/
 ```
 
-The data-preparation script generates a leakage-aware manifest under
-`artifacts/manifests/`.
+Run the data-preparation workflow to regenerate the leakage-aware inventory, SHA-256 duplicate audit, and train/validation/test manifest locally under `artifacts/manifests/`.
+
+This keeps the public repository lean while preserving the exact engineering workflow used to reproduce the metadata.
