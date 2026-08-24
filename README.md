@@ -1,4 +1,6 @@
- OtoVision-MLOps
+# OtoVision-MLOps
+
+[![CI](https://github.com/singhankitsrf/Otovision-MLOps/actions/workflows/ci.yml/badge.svg)](https://github.com/singhankitsrf/Otovision-MLOps/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
 **Production-oriented otoscopic image classification, uncertainty-aware referral, explainability, API serving, Docker, Kubernetes, and CI.**
 
@@ -37,8 +39,6 @@ An archive-level CRC audit identified **78 repeated-content groups (156 files to
 The project therefore computes **SHA-256 after extraction**, keeps one canonical copy for modeling, and performs stratified splitting only after exact-duplicate removal. Archive CRC is used only as an initial warning signal; SHA-256 is the training-time source of truth.
 
 See [`docs/DATASET_AUDIT.md`](docs/DATASET_AUDIT.md).
-
-![Dataset audit](assets/dataset_audit.png)
 
 ## Architecture
 
@@ -159,17 +159,7 @@ python scripts/evaluate.py \
   --checkpoint artifacts/models/best.pt
 ```
 
-Evaluation produces:
-
-- accuracy and balanced accuracy
-- macro/weighted precision, recall and F1
-- multiclass ROC-AUC (OvR)
-- per-class sensitivity/recall and specificity
-- confusion matrix
-- reliability diagram
-- expected calibration error (ECE)
-- multiclass Brier score
-- selective-coverage analysis for human-review routing
+Evaluation produces accuracy, balanced accuracy, macro/weighted precision, recall and F1, multiclass ROC-AUC, per-class sensitivity/specificity, confusion matrix, reliability diagram, ECE, multiclass Brier score, and selective-coverage analysis.
 
 **No performance number is hard-coded in this repository.** Metrics are written only after the model is actually trained and evaluated.
 
@@ -189,34 +179,12 @@ export MODEL_PATH=artifacts/models/best.pt
 uvicorn otovision.api:app --host 0.0.0.0 --port 8000
 ```
 
-Endpoints:
-
-- `GET /health`
-- `POST /predict`
-
-Example:
-
-```bash
-curl -X POST "http://localhost:8000/predict" \
-  -F "file=@path/to/otoscope.jpg"
-```
-
-The response includes predicted class, class probabilities, maximum confidence, normalized entropy, and whether human review is recommended.
+Endpoints: `GET /health`, `POST /predict`.
 
 ## 8. Docker
 
 ```bash
 docker build -t otovision-mlops:latest .
-docker run --rm -p 8000:8000 \
-  -e MODEL_PATH=/models/best.pt \
-  -v "$(pwd)/artifacts/models:/models:ro" \
-  otovision-mlops:latest
-```
-
-Or:
-
-```bash
-docker compose up --build
 ```
 
 ## 9. Kubernetes
@@ -225,19 +193,13 @@ docker compose up --build
 kubectl apply -f deploy/k8s/
 ```
 
-The supplied manifests include a Deployment, Service, HorizontalPodAutoscaler, health probes, and resource requests/limits. Mount a trained checkpoint at `/models/best.pt` before production-like deployment.
+The supplied manifests include a Deployment, Service, HPA, health probes, and resource requests/limits.
 
 ## 10. Test and lint
 
 ```bash
 pytest -q
 ruff check .
-```
-
-or:
-
-```bash
-make check
 ```
 
 ## What this project demonstrates to hiring teams
@@ -253,16 +215,6 @@ make check
 | MLOps | Docker, Kubernetes, HPA |
 | Software quality | pytest, Ruff, GitHub Actions |
 | Reproducibility | deterministic split, config, generated artifacts |
-
-## Recommended next upgrades
-
-- grouped patient/exam-level validation when identifiers are available
-- external-site validation on a separately sourced dataset
-- temperature scaling fitted on validation data
-- ONNX/TensorRT benchmark
-- MLflow experiment registry
-- cloud deployment with managed Kubernetes and object storage
-- monitoring for latency, drift, calibration, and referral rate
 
 ## Citation and data licensing
 

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dataset and archives
+data/raw/
+*.rar
+*.zip
+*.7z
+
+# Model artifacts
+artifacts/*
+!artifacts/.gitkeep
+*.pt
+*.pth
+*.onnx
+
+# Logs
+runs/
+logs/
+*.log
+
+# Secrets
+.env

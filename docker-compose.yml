@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_PATH: /models/best.pt
+    volumes:
+      - ./artifacts/models:/models:ro
+    read_only: true
+    tmpfs:
+      - /tmp
