@@ -37,13 +37,27 @@ def main():
     train_ds = OtoscopyDataset(manifest[manifest["split"] == "train"], train_tf, label_to_index)
     val_ds = OtoscopyDataset(manifest[manifest["split"] == "val"], eval_tf, label_to_index)
 
-    train_loader = DataLoader(train_ds, batch_size=int(cfg["batch_size"]), shuffle=True, num_workers=int(cfg["num_workers"]), pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=int(cfg["batch_size"]), shuffle=False, num_workers=int(cfg["num_workers"]), pin_memory=True)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=int(cfg["batch_size"]),
+        shuffle=True,
+        num_workers=int(cfg["num_workers"]),
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=int(cfg["batch_size"]),
+        shuffle=False,
+        num_workers=int(cfg["num_workers"]),
+        pin_memory=True,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(len(class_names), bool(cfg["pretrained"]), float(cfg["dropout"])).to(device)
     criterion = nn.CrossEntropyLoss(label_smoothing=float(cfg["label_smoothing"]))
-    optimizer = AdamW(model.parameters(), lr=float(cfg["learning_rate"]), weight_decay=float(cfg["weight_decay"]))
+    optimizer = AdamW(
+        model.parameters(), lr=float(cfg["learning_rate"]), weight_decay=float(cfg["weight_decay"])
+    )
     scheduler = CosineAnnealingLR(optimizer, T_max=int(cfg["epochs"]))
     scaler = torch.amp.GradScaler("cuda", enabled=bool(cfg["amp"]) and device.type == "cuda")
 
@@ -53,23 +67,32 @@ def main():
     epochs_without_improvement = 0
 
     for epoch in range(1, int(cfg["epochs"]) + 1):
-        train_metrics = train_epoch(model, train_loader, criterion, optimizer, scaler, device, bool(cfg["amp"]))
+        train_metrics = train_epoch(
+            model, train_loader, criterion, optimizer, scaler, device, bool(cfg["amp"])
+        )
         val_metrics = evaluate_epoch(model, val_loader, criterion, device)
         scheduler.step()
-        row = {"epoch": epoch, **{f"train_{k}": v for k, v in train_metrics.items()}, **{f"val_{k}": v for k, v in val_metrics.items()}}
+        row = {
+            "epoch": epoch,
+            **{f"train_{k}": v for k, v in train_metrics.items()},
+            **{f"val_{k}": v for k, v in val_metrics.items()},
+        }
         history.append(row)
         print(json.dumps(row))
 
         if val_metrics["macro_f1"] > best_f1:
             best_f1 = val_metrics["macro_f1"]
             epochs_without_improvement = 0
-            torch.save({
-                "model_state": model.state_dict(),
-                "class_names": class_names,
-                "image_size": int(cfg["image_size"]),
-                "dropout": float(cfg["dropout"]),
-                "best_val_macro_f1": best_f1,
-            }, model_dir / "best.pt")
+            torch.save(
+                {
+                    "model_state": model.state_dict(),
+                    "class_names": class_names,
+                    "image_size": int(cfg["image_size"]),
+                    "dropout": float(cfg["dropout"]),
+                    "best_val_macro_f1": best_f1,
+                },
+                model_dir / "best.pt",
+            )
         else:
             epochs_without_improvement += 1
         if epochs_without_improvement >= int(cfg["patience"]):

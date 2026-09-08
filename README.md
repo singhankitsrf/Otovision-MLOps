@@ -225,3 +225,8 @@ The code is released under the MIT License. **Dataset licensing is separate from
 **Ankit Kumar Singh**
 
 Healthcare AI • Applied Machine Learning • Medical Imaging • MLOps
+
+## Hugging Face deployment and evaluation
+
+See [deployment instructions](docs/HUGGING_FACE.md) and the `hf_space/` application.
+The `evaluation/` directory distinguishes measured results from pending image-model evaluation.
