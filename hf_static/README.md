@@ -2,7 +2,7 @@
 title: OtoVision MLOps
 emoji: 🔬
 colorFrom: blue
-colorTo: teal
+colorTo: green
 sdk: static
 app_file: index.html
 pinned: true
