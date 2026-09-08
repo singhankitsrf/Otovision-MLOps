@@ -33,7 +33,7 @@ def main():
     manifest = pd.read_csv(cfg["manifest"])
     _, eval_tf = build_transforms(image_size)
     test_df = manifest[(manifest["is_canonical"] == True) & (manifest["split"] == "test")]
-    ds = OtoscopyDataset(test_df, eval_tf)
+    ds = OtoscopyDataset(test_df, eval_tf, {name: i for i, name in enumerate(class_names)})
     loader = DataLoader(ds, batch_size=int(cfg["batch_size"]), shuffle=False)
 
     labels, probs = [], []
@@ -48,13 +48,35 @@ def main():
 
     out_dir = ensure_dir(Path(cfg["output_dir"]) / "evaluation")
     metrics = summary_metrics(y_true, probabilities)
-    metrics["per_class_specificity"] = dict(zip(class_names, per_class_specificity(y_true, y_pred, len(class_names))))
+    metrics["per_class_specificity"] = dict(
+        zip(class_names, per_class_specificity(y_true, y_pred, len(class_names)))
+    )
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    (out_dir / "classification_report.txt").write_text(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
+    np.savez_compressed(
+        out_dir / "predictions.npz",
+        y_true=y_true,
+        probabilities=probabilities,
+        class_names=np.asarray(class_names),
+    )
+    import hashlib
+
+    provenance = {
+        "checkpoint_sha256": hashlib.sha256(Path(args.checkpoint).read_bytes()).hexdigest(),
+        "manifest_sha256": hashlib.sha256(Path(cfg["manifest"]).read_bytes()).hexdigest(),
+        "test_samples": len(y_true),
+        "class_names": class_names,
+        "scope": "image-level holdout; patient independence not established",
+    }
+    (out_dir / "provenance.json").write_text(json.dumps(provenance, indent=2))
+    (out_dir / "classification_report.txt").write_text(
+        classification_report(y_true, y_pred, target_names=class_names, zero_division=0)
+    )
 
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(8, 7))
-    sns.heatmap(cm, annot=True, fmt="d", xticklabels=class_names, yticklabels=class_names, cmap="Blues")
+    sns.heatmap(
+        cm, annot=True, fmt="d", xticklabels=class_names, yticklabels=class_names, cmap="Blues"
+    )
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.tight_layout()
@@ -85,7 +107,13 @@ def main():
     for threshold in np.linspace(0.0, 1.0, 101):
         accept = entropies <= threshold
         if accept.any():
-            rows.append({"entropy_threshold": threshold, "coverage": float(accept.mean()), "accuracy": float(correctness[accept].mean())})
+            rows.append(
+                {
+                    "entropy_threshold": threshold,
+                    "coverage": float(accept.mean()),
+                    "accuracy": float(correctness[accept].mean()),
+                }
+            )
     pd.DataFrame(rows).to_csv(out_dir / "selective_coverage.csv", index=False)
     print(json.dumps(metrics, indent=2))
 

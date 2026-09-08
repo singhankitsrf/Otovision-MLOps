@@ -17,7 +17,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/your-org/otovision-mlops:latest
+          image: ghcr.io/singhankitsrf/otovision-mlops:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -26,7 +26,7 @@ spec:
               value: /models/best.pt
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10

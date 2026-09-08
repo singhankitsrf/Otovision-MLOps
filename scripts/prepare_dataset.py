@@ -30,7 +30,9 @@ def scan_dataset(root: Path) -> pd.DataFrame:
                 with Image.open(path) as img:
                     record.update(width=img.width, height=img.height, mode=img.mode, readable=True)
             except Exception as exc:
-                record.update(width=None, height=None, mode=None, readable=False, read_error=repr(exc))
+                record.update(
+                    width=None, height=None, mode=None, readable=False, read_error=repr(exc)
+                )
             record["sha256"] = sha256_file(path)
             records.append(record)
     return pd.DataFrame(records)
@@ -67,7 +69,9 @@ def assign_splits(df: pd.DataFrame, seed: int) -> pd.DataFrame:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", required=True, type=Path)
-    parser.add_argument("--manifest", type=Path, default=Path("artifacts/manifests/dataset_manifest.csv"))
+    parser.add_argument(
+        "--manifest", type=Path, default=Path("artifacts/manifests/dataset_manifest.csv")
+    )
     parser.add_argument("--split-seed", type=int, default=42)
     args = parser.parse_args()
 
