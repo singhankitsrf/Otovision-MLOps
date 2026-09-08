@@ -1,0 +1,52 @@
+name: Publish AgentForge Static Space
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/publish-agentforge-bridge.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  publish-agentforge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Hub dependency
+        run: pip install huggingface_hub==1.30.0
+      - name: Fetch validated AgentForge static bundle
+        run: |
+          mkdir -p /tmp/agentforge
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG/main/hf_static/README.md -o /tmp/agentforge/README.md
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG/main/hf_static/index.html -o /tmp/agentforge/index.html
+      - name: Smoke-test static application
+        run: |
+          python -m http.server 8000 --directory /tmp/agentforge >/tmp/agentforge-static.log 2>&1 &
+          server_pid=$!
+          trap 'kill $server_pid || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://localhost:8000/index.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/agentforge-static.log
+          exit 1
+      - name: Publish AgentForge to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          test -n "$HF_TOKEN" || { echo "HF_TOKEN is not configured in this authorized bridge repository"; exit 1; }
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo_id = "singhankit491/agentforge-enterprise"
+          api.create_repo(repo_id=repo_id, repo_type="space", space_sdk="static", exist_ok=True, private=False)
+          api.upload_folder(repo_id=repo_id, repo_type="space", folder_path="/tmp/agentforge", commit_message="Deploy AgentForge Enterprise static portfolio Space")
+          print(f"Published https://huggingface.co/spaces/{repo_id}")
+          PY
