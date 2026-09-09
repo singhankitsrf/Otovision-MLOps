@@ -230,3 +230,9 @@ Healthcare AI • Applied Machine Learning • Medical Imaging • MLOps
 
 See [deployment instructions](docs/HUGGING_FACE.md) and the `hf_space/` application.
 The `evaluation/` directory distinguishes measured results from pending image-model evaluation.
+
+## Project management
+
+- **Project charter:** [`PROJECT.md`](PROJECT.md)
+- **Live execution roadmap:** [Project Roadmap #3](https://github.com/singhankitsrf/Otovision-MLOps/issues/3)
+- **Portfolio index:** [Five flagship GitHub projects](https://github.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG/blob/main/PORTFOLIO_PROJECTS.md)
