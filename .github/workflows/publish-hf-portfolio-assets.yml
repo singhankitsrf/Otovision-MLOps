@@ -1,0 +1,454 @@
+name: Publish Hugging Face Portfolio Models and Datasets
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-hf-portfolio-assets.yml
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Checkout bridge repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install publishing dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'huggingface_hub>=0.34' pandas numpy scikit-learn joblib
+
+      - name: Retrieve portfolio source repositories
+        run: |
+          git clone --depth 1 https://github.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG.git /tmp/agentforge
+          git clone --depth 1 https://github.com/singhankitsrf/ClinRoute-NLP-ReleaseOps.git /tmp/clinroute
+          git clone --depth 1 https://github.com/singhankitsrf/MedLake-Azure-PySpark.git /tmp/medlake
+          git clone --depth 1 https://github.com/singhankitsrf/Otovision-MLOps.git /tmp/otovision
+          git clone --depth 1 https://github.com/singhankitsrf/OtoSage_AWS_GitHub.git /tmp/otosage
+
+      - name: Generate owned datasets and ClinRoute baseline
+        run: |
+          PYTHONPATH=/tmp/clinroute/src python /tmp/clinroute/scripts/generate_synthetic_data.py --rows 3000 --seed 42 --output /tmp/clinroute/data/synthetic_referrals.csv
+          PYTHONPATH=/tmp/clinroute/src python /tmp/clinroute/training/train_baseline.py --data /tmp/clinroute/data/synthetic_referrals.csv --output /tmp/clinroute/models/baseline --metrics /tmp/clinroute/artifacts/baseline_metrics.json
+          cd /tmp/clinroute
+          PYTHONPATH=src python scripts/export_static_space.py --output /tmp/clinroute_portable --models models/baseline --evaluation artifacts/baseline_metrics.json
+          cd -
+          python /tmp/medlake/scripts/generate_synthetic_data.py --rows 20000 --seed 42 --output /tmp/medlake/data/generated_screening_events.jsonl
+          PYTHONPATH=/tmp/agentforge/src python - <<'PY'
+          import json
+          from pathlib import Path
+          from agentforge.retrieval import DEFAULT_KB
+          out = Path('/tmp/agentforge_publish')
+          out.mkdir(parents=True, exist_ok=True)
+          (out / 'golden.jsonl').write_text(Path('/tmp/agentforge/evals/golden.jsonl').read_text())
+          (out / 'knowledge_base.jsonl').write_text(''.join(json.dumps({'id': d.id, 'title': d.title, 'text': d.text}, sort_keys=True) + '\n' for d in DEFAULT_KB))
+          PY
+
+      - name: Publish Hugging Face assets
+        run: |
+          cat > /tmp/publish_hf_assets.py <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          OWNER = 'singhankit491'
+          token = os.environ.get('HF_TOKEN')
+          if not token:
+              raise SystemExit('HF_TOKEN is not configured in GitHub Actions secrets')
+          api = HfApi(token=token)
+          identity = api.whoami()
+          if identity.get('name') != OWNER:
+              raise SystemExit(f"HF token belongs to {identity.get('name')!r}, expected {OWNER!r}")
+
+          root = Path('/tmp/hf_publish')
+          if root.exists():
+              shutil.rmtree(root)
+          root.mkdir(parents=True)
+
+          def sha256(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def rev(repo: str) -> str:
+              return subprocess.check_output(['git', '-C', repo, 'rev-parse', 'HEAD'], text=True).strip()
+
+          revisions = {
+              'agentforge': rev('/tmp/agentforge'),
+              'clinroute': rev('/tmp/clinroute'),
+              'medlake': rev('/tmp/medlake'),
+              'otovision': rev('/tmp/otovision'),
+              'otosage': rev('/tmp/otosage'),
+          }
+
+          assets = []
+
+          def publish(repo_name: str, repo_type: str, folder: Path, title: str, kind: str, source_repo: str, status: str):
+              repo_id = f'{OWNER}/{repo_name}'
+              api.create_repo(repo_id=repo_id, repo_type=repo_type, private=False, exist_ok=True)
+              api.upload_folder(repo_id=repo_id, repo_type=repo_type, folder_path=str(folder), commit_message='Publish verified portfolio asset')
+              url_type = 'datasets' if repo_type == 'dataset' else ''
+              url = f"https://huggingface.co/{'datasets/' if repo_type == 'dataset' else ''}{repo_id}"
+              assets.append({
+                  'name': repo_name,
+                  'title': title,
+                  'kind': kind,
+                  'repo_type': repo_type,
+                  'url': url,
+                  'source_repo': source_repo,
+                  'status': status,
+              })
+
+          # 1) AgentForge governed RAG evaluation dataset
+          d = root / 'agentforge-governed-rag-evals'
+          d.mkdir()
+          shutil.copy2('/tmp/agentforge_publish/golden.jsonl', d / 'golden.jsonl')
+          shutil.copy2('/tmp/agentforge_publish/knowledge_base.jsonl', d / 'knowledge_base.jsonl')
+          (d / 'provenance.json').write_text(json.dumps({
+              'source_repository': 'https://github.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG',
+              'source_revision': revisions['agentforge'],
+              'golden_sha256': sha256(d / 'golden.jsonl'),
+              'knowledge_base_sha256': sha256(d / 'knowledge_base.jsonl'),
+              'scope': 'deterministic engineering-contract evaluation',
+          }, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          pretty_name: AgentForge Governed RAG Evaluation Set
+          tags:
+          - agentic-ai
+          - rag
+          - evaluation
+          - responsible-ai
+          ---
+          # AgentForge Governed RAG Evaluation Set
+
+          Small, reproducible evaluation fixtures from **AgentForge Enterprise**.
+
+          - `golden.jsonl`: expected evidence/approval contract cases.
+          - `knowledge_base.jsonl`: the deterministic knowledge base used by the reference retriever.
+          - Source revision: `{revisions['agentforge']}`.
+
+          This dataset measures engineering contracts, not general LLM intelligence or enterprise production accuracy.
+
+          Source: https://github.com/singhankitsrf/AgentForge-Enterprise-Agentic-RAG
+          ''')
+          publish('agentforge-governed-rag-evals', 'dataset', d, 'AgentForge Governed RAG Evaluation Set', 'dataset', 'AgentForge-Enterprise-Agentic-RAG', 'published owned evaluation fixtures')
+
+          # 2) ClinRoute synthetic referral dataset
+          d = root / 'clinroute-synthetic-referrals'
+          d.mkdir()
+          shutil.copy2('/tmp/clinroute/data/synthetic_referrals.csv', d / 'synthetic_referrals.csv')
+          metrics = json.loads(Path('/tmp/clinroute/artifacts/baseline_metrics.json').read_text())
+          (d / 'benchmark_provenance.json').write_text(json.dumps({
+              'source_repository': 'https://github.com/singhankitsrf/ClinRoute-NLP-ReleaseOps',
+              'source_revision': revisions['clinroute'],
+              'rows': metrics['input_rows'],
+              'unique_normalized_notes': metrics['unique_notes'],
+              'seed': metrics['seed'],
+              'dataset_sha256': metrics['dataset_sha256'],
+              'normalized_corpus_sha256': metrics['normalized_corpus_sha256'],
+              'scope': metrics['benchmark_scope'],
+              'limitations': metrics['limitations'],
+          }, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          pretty_name: ClinRoute Synthetic ENT Referrals
+          task_categories:
+          - text-classification
+          tags:
+          - nlp
+          - synthetic-data
+          - healthcare-ai
+          - model-evaluation
+          ---
+          # ClinRoute Synthetic ENT Referrals
+
+          **3,000 deterministic synthetic ENT referral records (seed 42)** generated by the ClinRoute portfolio project.
+
+          Labels:
+          - referral route: otology, audiology, rhinology, laryngology, general ENT
+          - urgency: routine, expedited, urgent
+
+          This is synthetic test/benchmark data. It is **not patient data** and does not establish clinical generalization.
+
+          Dataset SHA-256: `{metrics['dataset_sha256']}`  
+          Source revision: `{revisions['clinroute']}`
+
+          Source: https://github.com/singhankitsrf/ClinRoute-NLP-ReleaseOps
+          ''')
+          publish('clinroute-synthetic-referrals', 'dataset', d, 'ClinRoute Synthetic ENT Referrals', 'dataset', 'ClinRoute-NLP-ReleaseOps', 'published generated synthetic dataset')
+
+          # 3) ClinRoute actual trained baseline model
+          d = root / 'clinroute-tfidf-logreg-synthetic-v2'
+          d.mkdir()
+          for name in ['route.joblib', 'urgency.joblib', 'VERSION']:
+              shutil.copy2(Path('/tmp/clinroute/models/baseline') / name, d / name)
+          for name in ['model.json', 'evaluation.json', 'validation.json']:
+              shutil.copy2(Path('/tmp/clinroute_portable') / name, d / name)
+          shutil.copy2('/tmp/clinroute/artifacts/baseline_metrics.json', d / 'baseline_metrics.json')
+          (d / 'README.md').write_text(f'''---
+          library_name: scikit-learn
+          pipeline_tag: text-classification
+          tags:
+          - nlp
+          - tfidf
+          - logistic-regression
+          - synthetic-data
+          - model-evaluation
+          - responsible-ai
+          ---
+          # ClinRoute TF-IDF + Logistic Regression — Synthetic v2
+
+          Two reproducibly trained scikit-learn pipelines for **route** and **urgency** prediction using the published ClinRoute synthetic dataset.
+
+          ## Measured synthetic benchmark
+          - Route accuracy: `{metrics['route']['accuracy']:.6f}`
+          - Route macro-F1: `{metrics['route']['macro_f1']:.6f}`
+          - Route ECE: `{metrics['route']['ece']:.6f}`
+          - Urgency accuracy: `{metrics['urgency']['accuracy']:.6f}`
+          - Urgency macro-F1: `{metrics['urgency']['macro_f1']:.6f}`
+          - Urgency ECE: `{metrics['urgency']['ece']:.6f}`
+          - Train/test normalized-text overlap: `{metrics['train_test_text_overlap']}`
+
+          These results are for templated synthetic data only and **must not be interpreted as clinical performance**.
+
+          Files include joblib pipelines plus the portable browser `model.json`, evaluation report, and validation fixtures.
+
+          Source revision: `{revisions['clinroute']}`  
+          Source: https://github.com/singhankitsrf/ClinRoute-NLP-ReleaseOps
+          ''')
+          publish('clinroute-tfidf-logreg-synthetic-v2', 'model', d, 'ClinRoute TF-IDF + Logistic Regression Synthetic v2', 'model', 'ClinRoute-NLP-ReleaseOps', 'published reproducibly trained model artifacts')
+
+          # 4) MedLake synthetic streaming/lakehouse dataset
+          d = root / 'medlake-synthetic-screening-events'
+          d.mkdir()
+          src = Path('/tmp/medlake/data/generated_screening_events.jsonl')
+          shutil.copy2(src, d / 'screening_events.jsonl')
+          med_spec = {
+              'rows': 20000,
+              'seed': 42,
+              'sha256': sha256(d / 'screening_events.jsonl'),
+              'source_revision': revisions['medlake'],
+              'synthetic': True,
+              'classes': ['normal', 'acute_otitis_media', 'chronic_otitis_media', 'cerumen_impaction', 'myringosclerosis'],
+              'screening_modes': ['camp', 'clinic', 'tele_screening'],
+              'devices': ['scope_a', 'scope_b', 'scope_c'],
+          }
+          (d / 'dataset_spec.json').write_text(json.dumps(med_spec, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          pretty_name: MedLake Synthetic Screening Events
+          tags:
+          - pyspark
+          - azure
+          - databricks
+          - delta-lake
+          - synthetic-data
+          - data-engineering
+          ---
+          # MedLake Synthetic Screening Events
+
+          **20,000 deterministic synthetic screening events (seed 42)** for testing the MedLake Bronze/Silver/Gold, quality, quarantine, deduplication and streaming workflows.
+
+          This dataset contains no real patient data. `patient_id` values are synthetic identifiers.
+
+          SHA-256: `{med_spec['sha256']}`  
+          Source revision: `{revisions['medlake']}`
+
+          Source: https://github.com/singhankitsrf/MedLake-Azure-PySpark
+          ''')
+          publish('medlake-synthetic-screening-events', 'dataset', d, 'MedLake Synthetic Screening Events', 'dataset', 'MedLake-Azure-PySpark', 'published generated synthetic dataset')
+
+          # 5) Shared otoscopic dataset specification only — no images redistributed
+          d = root / 'otoscopic-five-class-dataset-spec'
+          d.mkdir()
+          otoscopic_spec = {
+              'total_images_described': 3000,
+              'format_described': 'JPEG',
+              'classes': {
+                  'Acute Otitis Media': 600,
+                  'Cerumen Impaction': 600,
+                  'Chronic Otitis Media': 600,
+                  'Myringosclerosis': 600,
+                  'Normal': 600,
+              },
+              'used_by': ['OtoVision-MLOps', 'OtoSage_AWS_GitHub'],
+              'publication_mode': 'metadata-only',
+              'images_included': False,
+              'reason_images_not_included': 'Redistribution rights/source provenance are not established in the public repositories; genuine image files were not available to this publication workflow.',
+              'otovision_source_revision': revisions['otovision'],
+              'otosage_source_revision': revisions['otosage'],
+          }
+          (d / 'dataset_spec.json').write_text(json.dumps(otoscopic_spec, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          pretty_name: Five-Class Otoscopic Dataset Specification
+          tags:
+          - computer-vision
+          - healthcare-ai
+          - otoscopy
+          - metadata-only
+          ---
+          # Five-Class Otoscopic Dataset Specification
+
+          **Metadata-only dataset card** for the 3,000-image / five-class corpus described by OtoVision and OtoSage.
+
+          | Class | Described count |
+          |---|---:|
+          | Acute Otitis Media | 600 |
+          | Cerumen Impaction | 600 |
+          | Chronic Otitis Media | 600 |
+          | Myringosclerosis | 600 |
+          | Normal | 600 |
+
+          **No medical images are redistributed here.** Public redistribution rights/source provenance are not established in the repositories, and the genuine image files were not available to this publication workflow.
+
+          This card is therefore a provenance/schema artifact, not a downloadable image dataset.
+
+          OtoVision: https://github.com/singhankitsrf/Otovision-MLOps  
+          OtoSage: https://github.com/singhankitsrf/OtoSage_AWS_GitHub
+          ''')
+          publish('otoscopic-five-class-dataset-spec', 'dataset', d, 'Five-Class Otoscopic Dataset Specification', 'dataset-card', 'OtoVision + OtoSage', 'published metadata-only; images intentionally excluded')
+
+          # 6) OtoVision EfficientNet-B0 reference card — no checkpoint
+          d = root / 'otovision-efficientnet-b0-reference'
+          d.mkdir()
+          ov_spec = {
+              'framework': 'torchvision',
+              'architecture': 'efficientnet_b0',
+              'pretrained_weights_reference': 'EfficientNet_B0_Weights.DEFAULT',
+              'classifier_head': 'Dropout(0.25) + Linear(in_features, num_classes)',
+              'source_file': 'src/otovision/model.py',
+              'source_revision': revisions['otovision'],
+              'user_trained_checkpoint_included': False,
+          }
+          (d / 'model_spec.json').write_text(json.dumps(ov_spec, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          library_name: torchvision
+          pipeline_tag: image-classification
+          tags:
+          - efficientnet
+          - computer-vision
+          - healthcare-ai
+          - reference-card
+          ---
+          # OtoVision EfficientNet-B0 Reference
+
+          Architecture/provenance card for the OtoVision training pipeline.
+
+          - `torchvision.models.efficientnet_b0`
+          - pretrained dependency: `EfficientNet_B0_Weights.DEFAULT`
+          - five-class classifier head in the project code
+
+          **No user-trained OtoVision checkpoint is hosted here.** The genuine five-class model has not been published because the roadmap requires real dataset/checkpoint provenance and executed evaluation first.
+
+          Source revision: `{revisions['otovision']}`  
+          Source: https://github.com/singhankitsrf/Otovision-MLOps
+          ''')
+          publish('otovision-efficientnet-b0-reference', 'model', d, 'OtoVision EfficientNet-B0 Reference', 'model-card', 'Otovision-MLOps', 'published reference card; no user checkpoint')
+
+          # 7) OtoSage EfficientNetV2-S reference card — no checkpoint
+          d = root / 'otosage-efficientnetv2-s-reference'
+          d.mkdir()
+          os_spec = {
+              'framework': 'torchvision',
+              'architecture': 'efficientnet_v2_s',
+              'pretrained_weights_reference': 'EfficientNet_V2_S_Weights.DEFAULT',
+              'classifier_head': 'Dropout(0.25 default) + Linear(in_features, num_classes)',
+              'source_file': 'ml/src/train.py',
+              'source_revision': revisions['otosage'],
+              'user_trained_checkpoint_included': False,
+              'deployment_target': 'SageMaker asynchronous inference after validated training',
+          }
+          (d / 'model_spec.json').write_text(json.dumps(os_spec, indent=2) + '\n')
+          (d / 'README.md').write_text(f'''---
+          library_name: torchvision
+          pipeline_tag: image-classification
+          tags:
+          - efficientnet
+          - aws
+          - sagemaker
+          - healthcare-ai
+          - reference-card
+          ---
+          # OtoSage EfficientNetV2-S Reference
+
+          Architecture/provenance card for the OtoSage SageMaker training path.
+
+          - `torchvision.models.efficientnet_v2_s`
+          - pretrained dependency: `EfficientNet_V2_S_Weights.DEFAULT`
+          - project code replaces the classifier for the otoscopic classes
+
+          **No user-trained SageMaker checkpoint is hosted here.** The roadmap requires an executed SageMaker training/evaluation/model-registry run before a checkpoint or cloud-performance claim is published.
+
+          Source revision: `{revisions['otosage']}`  
+          Source: https://github.com/singhankitsrf/OtoSage_AWS_GitHub
+          ''')
+          publish('otosage-efficientnetv2-s-reference', 'model', d, 'OtoSage EfficientNetV2-S Reference', 'model-card', 'OtoSage_AWS_GitHub', 'published reference card; no user checkpoint')
+
+          # 8) Central registry for recruiter navigation and evidence boundaries
+          d = root / 'ai-portfolio-model-dataset-registry'
+          d.mkdir()
+          registry = {
+              'owner': OWNER,
+              'generated_at_by': 'GitHub Actions reproducible publication workflow',
+              'source_revisions': revisions,
+              'assets': assets,
+              'roadmap_only_not_published_as_models': [
+                  {
+                      'project': 'AgentForge Enterprise',
+                      'item': 'provider-backed LLM',
+                      'reason': 'No production LLM provider/model is pinned in the current roadmap implementation.'
+                  },
+                  {
+                      'project': 'ClinRoute NLP ReleaseOps',
+                      'item': 'optional Transformer candidate',
+                      'reason': 'No specific Transformer checkpoint is selected or benchmarked in the current implementation.'
+                  }
+              ],
+          }
+          (d / 'registry.json').write_text(json.dumps(registry, indent=2) + '\n')
+          rows = '\n'.join(f"| {a['title']} | {a['kind']} | {a['status']} | [HF]({a['url']}) |" for a in assets)
+          (d / 'README.md').write_text(f'''---
+          pretty_name: Ankit Kumar Singh AI Portfolio Model & Dataset Registry
+          tags:
+          - portfolio
+          - mlops
+          - model-evaluation
+          - responsible-ai
+          ---
+          # AI Portfolio Model & Dataset Registry
+
+          Central evidence-aware registry for the models, model references and datasets used across the five flagship portfolio roadmaps.
+
+          | Asset | Type | Evidence status | Link |
+          |---|---|---|---|
+          {rows}
+
+          ## Deliberately not misrepresented
+          - **AgentForge provider-backed LLM:** no specific production model is pinned yet, so no LLM checkpoint is published as mine.
+          - **ClinRoute Transformer candidate:** optional path exists, but no specific Transformer candidate is currently selected/benchmarked.
+          - **Otoscopic medical images:** metadata card only; images are not redistributed without established rights/provenance.
+          - **OtoVision/OtoSage pretrained EfficientNet weights:** referenced via torchvision identifiers; third-party pretrained weights are not mirrored as user-trained models.
+
+          GitHub portfolio: https://github.com/singhankitsrf  
+          Hugging Face profile: https://huggingface.co/singhankit491
+          ''')
+          publish('ai-portfolio-model-dataset-registry', 'dataset', d, 'AI Portfolio Model & Dataset Registry', 'registry', 'Five flagship roadmaps', 'published central registry')
+
+          print(json.dumps({'published': assets, 'registry': f'https://huggingface.co/datasets/{OWNER}/ai-portfolio-model-dataset-registry'}, indent=2))
+          PY
+          python /tmp/publish_hf_assets.py
