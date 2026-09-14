@@ -7,7 +7,6 @@ on:
     branches: ["main"]
     paths:
       - "hf_static/**"
-      - "lw_static/**"
       - "scripts/publish_static_space.py"
       - ".github/workflows/huggingface.yml"
 
@@ -24,30 +23,21 @@ jobs:
           python-version: "3.11"
       - name: Install Hub dependency
         run: pip install huggingface_hub==1.30.0
-      - name: Smoke-test static applications
+      - name: Smoke-test static application
         run: |
           python -m http.server 8000 --directory hf_static >/tmp/otovision-static.log 2>&1 &
           server_pid=$!
           trap 'kill $server_pid || true' EXIT
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://localhost:8000/index.html >/dev/null; then break; fi
+            if curl --fail --silent http://localhost:8000/index.html >/dev/null; then exit 0; fi
             sleep 1
           done
-          curl --fail --silent http://localhost:8000/index.html >/dev/null
-          kill $server_pid || true
-          python -m http.server 8001 --directory lw_static >/tmp/lw-static.log 2>&1 &
-          lw_pid=$!
-          trap 'kill $lw_pid || true' EXIT
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent http://localhost:8001/index.html >/dev/null; then break; fi
-            sleep 1
-          done
-          curl --fail --silent http://localhost:8001/index.html >/dev/null
-      - name: Publish free Static Spaces to Hugging Face
+          cat /tmp/otovision-static.log
+          exit 1
+      - name: Publish free Static Space to Hugging Face
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           test -n "$HF_TOKEN" || { echo "HF_TOKEN is not configured in this repository"; exit 1; }
           python scripts/publish_static_space.py --repo-id singhankit491/otovision-mlops --folder hf_static
-          python scripts/publish_static_space.py --repo-id singhankit491/lw-telemedicine-product --folder lw_static
