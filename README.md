@@ -220,6 +220,13 @@ ruff check .
 
 The code is released under the MIT License. **Dataset licensing is separate from code licensing.** Before making any image public, document the source, redistribution terms, provenance, de-identification status, and permitted use.
 
+
+## Evidence and real-world implementation
+
+Personally implemented by Ankit Kumar Singh for AI-assisted otoscopic and ENT clinical-support work associated with the ENT Department, AIIMS Raipur, and broader hospital-facing medical-support activity.
+
+Evidence is deliberately separated into repository-verifiable artifacts and author-confirmed institutional execution. See [EVIDENCE.md](EVIDENCE.md) for the verification matrix, reviewer path and claim boundaries.
+
 ## Author
 
 **Ankit Kumar Singh**
