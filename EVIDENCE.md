@@ -18,6 +18,18 @@ This statement records the author's implementation history. It does not by itsel
 | Measured result | The repository currently marks publishable model metrics as pending because the trained checkpoint/dataset are not committed. | Transparent evidence gap; no metric should be inferred |
 | Ownership | The repository was personally implemented by Ankit Kumar Singh. | Author-confirmed |
 
+## Institutional impact context
+
+The following facts are supplied by the author and should be verified through authorized institutional records when required:
+
+- prototype real-time clinical decision-support implementation associated with the ENT Department, AIIMS Raipur;
+- an ENT operational environment serving more than 10,000 users/patient interactions annually; this figure is contextual reach, not a claim that every interaction used the model;
+- relevant research governance under Institutional Ethics Committee approval **NITRR/IEC/2025/14**, dated **16 October 2025**;
+- dataset acquisition and labeling conducted with qualified ENT-domain participation, subject to institutional permissions and confidentiality;
+- personal implementation ownership by Ankit Kumar Singh.
+
+These facts materially strengthen delivery credibility but do not establish regulatory clearance, prospective clinical efficacy or autonomous diagnostic suitability.
+
 ## Reviewer path
 
 1. Read the main README and architecture documentation.
